@@ -1,0 +1,93 @@
+---
+title: "GeneOntology.Harman.June20.2015"
+output: html_document
+---
+
+CSHL-C-DATA - Tutorial 3: GO scoring using Fisher’s Exact test
+Vincent FitzPatrick
+
+Friday, June 19, 2015
+
+```{r}
+#the derisi file must be in the current working directory
+load("derisi.rda")
+head(derisi)
+#pull ORF names from the derisi dataset, and put them in a new dataset
+
+derisi.orfs <- derisi$ORF
+#install a R package from the Bioconductorwe
+source("http://bioconductor.org/biocLite.R")
+biocLite("GO.db")
+load("GO.db"")
+#load org.Sc.sga bioconductor package
+source("http://bioconductor.org/biocLite.R")
+biocLite("org.Sc.sgd.db")
+load("org.Sc.sgd.db"")
+
+
+db.orfs = keys(org.Sc.sgd.db,keytype = "ORF")
+universe = intersect(derisi.orfs, db.orfs)
+derisi.orfs <- derisi$ORF
+load("derisi.rda")
+derisi.orfs <- derisi$ORF
+db.orfs = keys(org.Sc.sgd.db,keytype = "ORF")
+universe = intersect(derisi.orfs, db.orfs)
+N = length(universe)
+N
+z = z[universe,]
+load("z.rda")
+derisi.orfs = rownames(z)
+head(derisi.orfs)
+z = z[universe,]
+dim(z)
+colnames(org.Sc.sgd.db)
+#Find the GO identifier associated with the term tricarboxylic acid cycle; "TERM" is a keytype <?
+TCA.goid = select(GO.db, keys = "tricarboxylic acid cycle", keytype = "TERM", columns = "GOID")$GOID
+TCA.goid
+select(org.Sc.sgd.db, keys = TCA.goid, keytype = "GOALL", columns = "ORF")#Determine the ORF that corresponds with the GOid: Look in the org.Sc.sgd.db database >> find any keys that correspond with the GOid: GO:0006099 >> search for the ORF under the column >> ORF
+keytypes(org.Sc.sgd.db)
+#Awesome description of org.Sc.sgd.db database components [ie:keys,columns, etc]; http://www.bioconductor.org/help/course-materials/2014/useR2014/Integration.html
+TCA.orfs = select(org.Sc.sgd.db, keys = TCA.goid, keytype = "GOALL", columns = "ORF")$ORF
+length(TCA.orfs) # same ORF can reappear with different evidence code
+length(unique(TCA.orfs)) #<-?
+#Identify Duplicate ORFs
+table(universe %in% TCA.orfs)
+#universe variable: contains the names of the genes that are found in both the annotation package and derisi.orfs
+universe = intersect(derisi.orfs, db.orfs)
+K = sum(universe %in% TCA.orfs)
+K
+#remove rows of z from universe
+z = z[universe,]
+dim(z)
+#Determine the set of upregulated ORFs that have a p-value smaller than 10−3 at the last timepoint.
+#Determine the set of upregulated ORFs that have a p-value smaller than 10^3 at the last timepoint.
+head(universe)
+p7 = pnorm(z[,7],lower.tail=F)
+upregulated.orfs = universe[p7<.001]
+n = length(upregulated.orfs)
+n
+n = length(upregulated.orfs) #Count the number of ORFs that have a p-value smaller than 10^3 at the last timepoint and store the results as the sample size n
+n
+#Count the number of genes with p-value<10^-3
+table(upregulated.orfs %in% TCA.orfs)
+k = sum(upregulated.orfs %in% TCA.orfs)
+k
+#how many of these genes do you expect to be annotated as “tricarboxylic acid cycle”
+success.rate.expected = K/N
+success.rate.expected
+k.expected = n * success.rate.expected
+k.expected
+#fold-enrichment (i.e. observed divided by expected number of genes) of “tricarboxylic acid cycle” genes among the significantly upregulated genes
+k / k.expected
+(k/n) / (K/N)
+#Scoring a GO category with Fisher’s exact test
+
+```
+
+You can also embed plots, for example:
+
+```{r, echo=FALSE}
+plot(cars)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

@@ -1,0 +1,773 @@
+---
+title: "Data Analysis for High-dimensional data"
+author: "Rafa & Stephanie"
+date: "June 20, 2015"
+output: html_document
+layout: page
+---
+
+# Getting Ready
+
+Dowlonad the data from the course website. We have created several `.rda` files for you.
+
+You will also need to install several package from Bioconductor which are available from the Bioconductor projects. 
+ 
+```{r Install Bioc,eval=FALSE}
+source("http://www.bioconductor.org/biocLite.R")
+biocLite("genefilter")
+biocLite("hgfocus.db")
+```
+
+Optional package to make figures prettier:
+```{r}
+install.packages("devtools")
+library(devtools)
+install_github("ririzarr/rafalib")
+```
+
+# Introduction
+
+High-throughput technologies have changed basic biology and the biomedical sciences from data poor disciplines to a data intensive ones. A specific example comes from research fields interested in understanding gene expression. Gene expression is the process in which DNA, the blueprint for life, is copied into RNA, the templates for the synthesis of proteins, the building blocks for life.  In the 1990s, the analysis of gene expression data amounted to spotting black dots on a piece of paper or extracting a few numbers from standard curves. With high-throughput technologies such as microarrays this suddenly changed to sifting through tens of thousands of numbers. Biologists went from using their eyes or simple summaries to categorize results to having thousands (and now millions) of measurements per sample to analyze. Here we will learn about the statistical techniques that have been widely used with these technologies.
+
+Because there is a vast number of public datasets, we use many gene expression examples but the statistical techniques you will learn have also proven useful in other fields that make use of high throughput technologies. Technologies such as microarrays, next generation sequencing, fRMI, and mass spectrometry all produce data to answer questions for which what we learn here will be indispensable. The specific topics we will learn are inference in the context of high-throughput data, distance and clustering, dimension reduction, and advanced exploratory data analysis. Because there is an interplay between these topics we will cover each separately. 
+
+## Data organized in three tables
+
+Most of the data we use as examples in this class are created with high-throughput technologies. These technologies measure thousands of *features*. Examples of feature are genes, single base locations of the genome, genomic regions, or image pixel intensities. Each specific measurement product is defined by a specific set of features. 
+For example, a specific gene expression microarray product is defined by the set of genes that it measures. 
+
+A specific study will typically use one product and use it to make measurements on several experimental units such as individuals. The most common experimental unit will be the individual but  they can be defined by other entities such as different parts of a tumor. We often call the experimental units *samples* following because experimental jargon. It is important that these are not confused with samples in the context of our previous chapters as in "random sample". 
+
+So a high throughput experiment is usually defined by three tables: one with the high-throughput measurements and two tables with information about the columns and rows of this first table respectively.
+
+Because a dataset is typically defined by set of experimental unit and a product  defines a fixed set of features the high-throughput measurements can be stored in an $n \times m$ matrix with $n$ the number of units and $m$ the number of features. In R the convention has been to store the transpose of these matrices. Here is an example from a gene expression dataset:
+
+```{r load subset data}
+load("GSE5859Subset.rda")
+dim(geneExpression)
+```
+
+We have RNA expression measurements for 8793 genes from blood taken from 24 individuals (the experimental units). For most statistical analysis we will also need information about the individuals. For example, in this case, the data was originally collected to compare gene expression across ethnic groups. However, we have created a subset of this dataset for illustration and separated the data into two groups:
+
+
+```{r Properties of Subset Data}
+dim(sampleInfo)
+head(sampleInfo)
+sampleInfo$group
+```
+
+Note that one of the columns, filenames, permits us connect the rows of this table to the columns of the measurement table.
+
+```{r Check rows match columns}
+match(sampleInfo$filename,colnames(geneExpression))
+```
+
+Finally, we have a table describing the features
+
+```{r Feature Annotation}
+dim(geneAnnotation)
+head(geneAnnotation)
+```
+
+Note that it includes an ID that permits us to connect the rows of this table with the rows of the measurement table:
+```{r More on Feature Annotation}
+head(match(geneAnnotation$PROBEID,rownames(geneExpression)))
+```
+
+The table also includes biological information abuot the features. Namely,  chromosome location and the gene "name" used by biologists.
+
+## Problem 1
+
+Question: How many of the samples were processed in June 27, 2005?
+
+Answer:
+```{r Problem 1}
+## Provide your answer here
+ length(grep("2005-06-27",sampleInfo$dat))
+sum(sampleInfo$dat=="2005-06-27")
+
+```
+
+## Problem 2
+Question: How many of the genes represented in this particular technology are on chromosome Y?
+
+Answer:
+```{r Answer 2}
+## Provide your answer here
+sum(geneAnnotation$CHR=="chrY",na.rm=TRUE)
+```
+
+## Problem 3
+
+Question: What is the log expression value of the for gene ARPC1A
+on the one subject that we measured on 2005-06-10 ?
+
+Answer:
+```{r Answer 3 }
+## Provide your answer here
+i <- which(geneAnnotation$SYMBOL=="ARPC1A")
+j <- which(sampleInfo$date=="2005-06-10")
+geneExpression[i,j]
+```
+
+## Examples
+
+Here we list of some of the examples of data analysis questions we might be asked to answer with the dataset shown here:
+
+* Inference: for which genes are the population averages different across ethnic groups? 
+
+* Machine learning: build an algorithm that given gene expression patterns, predicts ethnic group.
+
+* Clustering: Can we discover subpopulations of individuals from the gene expression patterns? Or can we discover genes pathways based on which cluster together across individuals?
+
+* Exploratory data analysis: Did some epxeriments failed experiments? Are the assumptions needed to use standard statistical techniques met? 
+
+# Functions
+
+Before we continue introducing statistical concepts we will review how to make functions in R. Here are some simple examples:
+
+## Example 1: A Box-Cox transformation
+
+```{r Box-Cox transformation function}
+boxcox <- function(x, k=0.5){
+  log2(x+k)
+}
+
+x <- rpois(10, 1)
+
+log2(x)
+boxcox(x)
+```
+
+
+## Example 2: MA-plot
+
+```{r MA-plot function example}
+maplot <- function(x, y){
+  A = (x+y)/2
+  M = y-x
+  plot(A, M)
+}
+
+plot(geneExpression[,1], geneExpression[,2])
+maplot(geneExpression[,1], geneExpression[,2])
+```
+
+## Problem 4
+
+Question: Create a function that that takes a list of numbers (`x`) and reports the number of 0s in `x`:
+
+```{r data for problem 4}
+#set seed keeps the randomly selected numbers the same
+set.seed(1)
+x = rpois(1000, 1)
+```
+
+Answer:
+```{r Answer 4}
+## Provide your answer here
+
+```
+
+# Inference for high-dimensional data
+
+Suppose we were given highthroughput gene expression data that was measured for several individuals in two populations. We are asked to report:
+- which genes have different average expression levels in the two populations
+
+Note that if, instead thousands of genes, we were handed data from just one gene we could simply apply  the inference techniques that we have learned before. We could, for example, use a *t*-test or some other test. Here we review what changes when we consider high-throughput data.
+
+## Thousands of tests
+
+In this data we have two groups denoted with 0 and 1:
+```{r look at groups}
+g <- sampleInfo$group
+g
+sample(g)
+```
+
+If we were interested in a particular gene, let's arbitrarily pick the one on the 25th row, we would simply compute a *t*-test; assuming the data is well approximated by normal:
+
+```{r Check for normalit}
+e <- geneExpression[25,] #select gene 25
+library(rafalib);mypar2(1,2) ##optional
+qqnorm(e[g==1]) #test to see if gene is normally distributed
+qqline(e[g==1])
+qqnorm(e[g==0])
+qqline(e[g==0])
+```
+
+The qq-plots show that the data is well approximated by the normal approximation so apply a *t*-test. The *t*-test does not find this gene to be statistically significant:
+
+```{r t-test}
+t.test(e[g==1], e[g==0])
+```
+
+To answer the question for each gene we simply do this for every gene. Here we will define our own function and use `apply()`:
+
+```{r Get all the p-values}
+#run a t-test for every gene
+myttest <- function(x) {t.test(x[g==1], x[g==0], var.equal=TRUE)$p.value
+      }
+#takes row/vector X, and split male and female: x[g==1], x[g==0], return p value for each: $p.value
+
+pvals <- apply(geneExpression, 1, myttest)
+#apply p.value to each element in the list
+```
+
+We can now see which genes have *p*-values less than, say, 0.05. For example right away we see that:
+
+```{r Number of genes with p less than 0.05}
+sum(pvals<0.05)
+```
+genes had *p*-values less than 0.05.
+
+However, as we will describe in more detail below, we have to be careful in interpreting this result because we have performed over 8,000 tests. 
+
+## Problem 5
+
+Question: If we performed the same procedure on random data, for which the null hypothesis is true for all features, how many *p*-value less than 0.05 do we obtain?
+Hint: Use the function `matrix()` to create a matrix with these dimensions. Also use ` `rnorm()` to create random numbers.
+
+```{r Dimensions for Answer}
+m <- nrow(geneExpression)
+n <- ncol(geneExpression)
+```
+
+Anwser:
+```{r Answer 5}
+## Provide your answer here
+
+```
+
+Below we explain why this is to be expected.
+
+## p-value histograms
+
+Note that when the null is true, we expect the distribution of *p*-values to be uniform:
+
+```{r, echo=FALSE}
+library(rafalib); mypar2(1,1) ##optional
+set.seed(1)
+m <- nrow(geneExpression)
+n <- ncol(geneExpression)
+randomData <- matrix(rnorm(n*m), m, n)
+nullpvals <- apply(randomData, 1, myttest)
+hist(nullpvals)
+```
+
+This implies that 0.05 of tests are expected to be less than 0.05. Note that 419 is roughly 0.05*8192.
+
+
+## Faster implementation of *t*-test
+
+Before, we continue, we should note that the above implementation is very inefficient. There are several faster implementations that perform *t*-test for high throughput data. For example the `rowttests()` function in the `genefilter` R/Bioconductor package. 
+
+```{r genefilter,message=FALSE}
+library(genefilter)
+results <- rowttests(geneExpression, factor(g))
+max(abs(pvals-results$p))
+```
+
+Note that we get practically the same answer and much faster performance.
+
+# Distance
+
+## Introduction
+
+The concept of distance can be generalized from  physical distance. For example, we cluster animals into groups. When we do this, we put animals that are "close" in the same group:
+
+<img src="https://raw.githubusercontent.com/genomicsclass/labs/master/course3/images/animals.png" align="middle" width="800">
+
+Any time we cluster individuals into separate groups we are, explicitly or implicitly compute a distance. 
+
+To create *heatmaps* a distance is computed explicitly. Heatmaps are widely used in genomics and other highthroughput fields:
+
+<img src="https://upload.wikimedia.org/wikipedia/commons/4/48/Heatmap.png" align="middle" width="800">
+
+Image Source: Heatmap, Gaeddal, 01.28.2007, http://commons.wikimedia.org/wiki/File:Heatmap.png
+
+The measurements in these plots, which are stored in a matrix, are represented with colors after the columns and rows have been clustered. Here we will learn the necessary mathematics and computing skill to understand and create heatmaps. We start by reviewing the mathematical definition of distance. 
+
+## Euclidean Distance
+
+As a review, let's define the distance between two points, $A$ and $B$, on a cartesian plane.
+
+```{r Cartoon for distance,echo=FALSE,fig.align='center',fig.height=4}
+library(rafalib)
+mypar(1,1)
+plot(c(0,1,1),c(0,0,1),pch=16,cex=2,xaxt="n",yaxt="n",xlab="",ylab="",bty="n",xlim=c(-0.25,1.25),ylim=c(-0.25,1.25))
+lines(c(0,1,1,0),c(0,0,1,0))
+text(0,.2,expression(paste('(A'[x]*',A'[y]*')')),cex=1.5)
+text(1,1.2,expression(paste('(B'[x]*',B'[y]*')')),cex=1.5)
+text(-0.1,0,"A",cex=2)
+text(1.1,1,"B",cex=2)
+```
+
+The euclidean distance between A and B is simply
+
+$$\sqrt{ (A_x-B_x)^2 + (A_y-B_y)^2 } $$
+
+## High dimensional Data
+
+In this chapter we focus on high-dimensional data. We introduce a data set with gene expression measurements for 22215 genes from 189 samples. The R ojects can be loaded like this:
+
+
+```{r load gene expression data}
+load("tissuesGeneExpression.rda")
+table(tissue)
+```
+
+## Distance in high dimensions
+
+We are interested in describing distance in the context of this dataset. We might also be interested in finding genes that *behave similarly* across samples.
+
+Distance is computed between points. With high dimensional data, points are no longer on the cartesian plan. Instead they are in higher dimensions. For example, sample $i$ is defined by the point in 22215 dimesions $(Y_{1,i},\dots,Y_{22215,i})'$. Feature $g$ is defined by the point in 189 dimensions $(Y_{g,189},\dots,Y_{g,189})'$
+
+Once we define points, the Euclidean distance is defined in a very similar way as it is defined for two dimensions. For example, the  distance between two samples $i$ and $j$ is
+
+$$
+d(i,j) = \sqrt{ \sum_{g=1}^{22215} (Y_{g,i}-Y_{g,j })^2 }
+$$
+
+and the distance between two features $h$ and $g$ as:
+$$
+d(h,g) = \sqrt{ \sum_{i=1}^{189} (Y_{h,i}-Y_{g,i})^2 }
+$$
+
+## Examples
+
+We can now use the formulas above to compute distance. Let's compute distance between samples 1 and 2, both kidneys, and then to 87, a colon.
+
+```{r Simple distance example}
+x <- e[,1]
+y <- e[,2]
+z <- e[,87]
+sqrt(sum((x-y)^2))
+sqrt(sum((x-z)^2))
+```
+
+Now to compute all the distances at once we have the function `dist()`. It computes the distance between each row. Here we are interested in the distance between samples, so we transpose the matrix:
+
+```{r the dist function}
+d <- dist(t(e)) #transpose every element in the matrix -> turns every row into a column before comparing
+class(d)
+```
+
+Note that this produces the an object of class `dist`; therefore to access to entries we need to coerce into a matrix using the `as.matrix()` function:
+
+```{r comparisong to previous distance}
+as.matrix(d)[1,2]
+as.matrix(d)[1,87]
+```
+
+It is important to keep in mind that if we run `dist()` on `e` it will compute all pairwise distances between genes. This will try to create a $22215 \times 22215$ matrix that may kill crash your R sessions.
+
+
+## Problem 6 
+
+Question: How many biological replicates for hippocampus
+
+Answer: 
+```{r Answer 6}
+## Provide your answer here
+
+```
+
+## Problem 7
+
+Question: What is the distance between samples 3 and 45?
+
+Answer:
+```{r Answer 7}
+## Provide your answer here
+d <- dist([3,25] t(e))
+```
+
+## Problem 8
+
+Question: What is the distance between gene `210486_at` and `200805_at`
+
+Answer:
+
+Explanation:
+```{r Answer 8}
+## Provide your answer here
+
+```
+
+## Problem 9
+
+If I run the command (**don't run it!**)
+
+```{r,eval=FALSE}
+d = as.matrix(dist( e))
+```
+
+Question: How many cells (number of rows times number of columns) does this matrix have?
+
+Answer: 
+```{r Answer 9 }
+## Provide your answer here
+
+```
+
+## Problem 10
+
+Compute the distance between all pair of samples:
+
+```{r dist again}
+d = dist( t(e) )
+```
+
+Read the help file for `dist()`.
+
+Question: How many distances are stored in `d`? (Hint: What is the length of d)? 
+
+Answer: 
+```{r Answer 10}
+## Provide your answer here
+
+```
+
+## Problem 11
+Question: Why is the answer to Problem 10 not `ncol(e)^2`?
+
+* R made a mistake there?
+* Distances of 0 are left out?
+* Because we take advantage of symmetry: only lower triangular matrix is stored thus only `ncol(e)*(ncol(e)-1)/2` values ?
+* Because it is equal`nrow(e)^2` ?
+
+## Hierarchical clustering
+
+We can also use the `hclust()` function to cluster the tissues in our gene expression data. We will create a dendogram which is a tree-like diagram used to arrange the clusters produced from the clustering. We will also label and color the samples by tissue.
+
+```{r hierarchical clustering, fig.width=10}
+library(rafalib); mypar2(1, 1) ##optional
+myplclust(hclust(d), labels=as.factor(tissue), 
+          lab.col = as.numeric(as.factor(tissue)))
+```
+
+
+# PCA and Multi-dimensional scaling
+
+## Introduction
+
+Visualizing data is one of the most, if not the most, important step in the analysis of high throughput data. The right visualization method may reveal problems with the experimental data that can render the results from a standard analysis, that is typically appropriate, completely useless. 
+
+We have shown methods for visualizing global properties of the columns of rows but plots that reveal relationships between columns or between rows are more complicated due to the high dimensionality of data. To compare each of the 189 samples to each other we would have created, for example, 17,766 MA plots. Creating a scatter plot of the data is impossible since points are very high dimensional. 
+
+Here we describe a powerful technique for exploratory data analysis based on dimension reduction. The general idea is relatively simple, we reduce the dataset to have a few dimensions yet approximately preserve certain properties such as distance between samples. Once we reduce it to, say, two dimensions, we can easily make plots. The technique behind it all, the singular value decomposition, is also useful in other context.  
+
+
+## Rotations 
+
+We consider an example with twin heights. Here are 100 two dimensional points $Y$:
+
+```{r simulate twin heights,echo=FALSE,fig.align="center"}
+suppressPackageStartupMessages(library(MASS))
+n = 100
+mypar2(1,1)
+set.seed(1)
+y=t(mvrnorm(n,c(0,0), matrix(c(1,0.95,0.95,1),2,2)))
+plot(y[1,], y[2,], xlab="Twin 1 (standardized height)", 
+     ylab="Twin 2 (standardized height)", xlim=c(-3,3), ylim=c(-3,3))
+points(y[1,1:2], y[2,1:2], col=2, pch=16)
+```
+
+We can think of this as $N$ sample (twin pairs) and 2 genes
+(the two heights). 
+
+We can compute the distance between any two samples
+
+```{r}
+d=dist(t(y))
+as.matrix(d)[1,2]
+y[,1:2]
+```
+
+What if 2 dimensions is too much and we want to reduce dimensions?
+
+We can define a new matrix:
+
+```{r}
+z1 = (y[1,]+y[2,]) / sqrt(2)
+z2 = (y[1,]-y[2,]) / sqrt(2)
+plot(y[1,],y[2,],xlab="Twin 1 (standardized height)",ylab="Twin 2 (standardized height)",xlim=c(-3,3),ylim=c(-3,3))
+points(y[1,1:2],y[2,1:2],col=2,pch=16)
+plot(z1,z2,xlim=range(y),ylim=range(y))
+points(z1[1:2],z2[1:2],col=2,pch=16)
+```
+
+Note that the distance is the same!
+```{r}
+z=rbind(z1,z2)
+d2=dist(t(z))
+as.matrix(d)[1,2]
+as.matrix(d2)[1,2]
+```
+
+But here is the best part, we get very very close with just one dimension:
+
+```{r}
+d3 = dist(z1)
+plot(d,d3)
+```
+
+This is the first principal component.
+
+## MDS
+
+The idea behind MDS is that the distance between $\mathbf{Y}_i$ and $\mathbf{Y}_j$ is approximated by the distance between points of lower dimensional. To make a tractable plot we tend to use a two dimensional vector because we can visualize the distances.
+
+
+## Example 
+
+Here is an MDS plot for kidney, liver and  colon samples
+
+Suppose we want to explore just two dimensions. We use principal components and look at the first few PCs using the `prcomp()` function. 
+
+```{r}
+pc <- prcomp( e - rowMeans(e))
+```
+
+
+```{r,echo=FALSE,fig.align="center"}
+library(rafalib)
+mypar2(1,1)
+ftissue = as.factor(tissue)
+plot(pc$rotation[,1], pc$rotation[,2], bg=as.numeric(ftissue), pch=21, 
+     xlab="First dimension", ylab="Second dimension")
+legend("topleft", levels(ftissue), col=seq(along=levels(ftissue)), 
+       pch=15, cex=.5)
+```
+
+
+## Variance Explained
+
+The PC calculation gives us a summary of how much variance each column explains.
+
+```{r}
+ve = pc$sdev
+plot(ve^2 / sum(ve^2)*100, xlab="PC", ylab="Variance explained")#proportion of variance compared to the total
+```
+
+
+### The `cmdscale()` function
+
+```{r}
+d = dist(t(e))
+mds = cmdscale(d)
+plot(mds[,1], mds[,2], bg=as.numeric(ftissue), pch=21, 
+     xlab="First dimension", ylab="Second dimension")
+```
+
+
+# EDA and analysis: putting it all together
+
+## Introduction
+
+Now that we understand PCA we are going to demonstrate how we use it in practice with an emphasis on  exploratory data analysis. To illustrate we will go through an actual dataset that has not be sanitized for teaching purposes. We start with the raw data as it was provided in the public repository. The only step we did for you is preprocess these data and create an R package with a preformed Bioconductor object.
+
+## Gene Expression Data
+
+Start by loading the data:
+```{r load data again,message=FALSE}
+library(Biobase)
+load("GSE5859.rda")
+```
+
+We start by exploring the sample correlation matrix and noting that 
+one pair has a correlation of 1. This must mean that the same sample was uploaded twice to the public repository but given different names. The following code identifies this sample and removes it.
+
+```{r find and remove replicated samples}
+cors <- cor(exprs(e))
+Pairs = which(abs(cors)>0.9999, arr.ind=TRUE)
+out = Pairs[which(Pairs[,1]<Pairs[,2]), , drop=FALSE]
+if(length(out[,2])>0) e=e[,-out[2]]
+```
+
+We also remove control probes from the analysis:
+
+```{r take out controls}
+out <- grep("AFFX", featureNames(e))
+e <- e[-out,]
+```
+
+
+Now we are ready to proceed. We will create a detrended gene expression data matrix and extract the dates and outcome of interest from the sample annotation table. 
+
+```{r prepare the data}
+y <- exprs(e) - rowMeans(exprs(e))
+dates <- pData(e)$date
+eth <- pData(e)$ethnicity
+```
+
+The original dataset did not include sex in the sample information. We did this for you in the subset dataset we provided for illustrative purposes. In the code below we show how we predict the sex of each sample. The basic idea is to look at the median gene expression levels on Y chromosome genes. Males should have much higher values. We need to upload an annotation package that provides information for the features of the platform used in this experiment:
+
+```{r what is the annotation}
+annotation(e)
+```
+
+We need to download and install the `hgfocus.db` package and then extract the chromosome location information
+
+```{r get annotation information,message=FALSE}
+library(hgfocus.db)
+annot <- select(hgfocus.db, keys=featureNames(e), keytype="PROBEID",columns=c("CHR"))
+##for genes with multiples, pick on
+annot <-annot[match(featureNames(e), annot$PROBEID),]
+annot$CHR <- ifelse(is.na(annot$CHR), NA, paste0("chr",annot$CHR))
+chryexp <- colMeans(y[which(annot$CHR=="chrY"), ])
+```
+
+Note you can clearly see two modes which must be females and males:
+```{r}
+mypar2()
+hist(chryexp)
+```
+
+So we can predict sex this way:
+```{r}
+sex <- factor(ifelse(chryexp<0, "F", "M"))
+```
+
+## Calculating the PCs
+
+We have shown how we can compute principal components using 
+
+```{r get PC of GSE5859}
+pc <- prcomp(y)
+```
+
+## Variance explained
+
+A first step in determining how much sample correlation induced_structure_ there is in the data. 
+
+```{r}
+cols=colorRampPalette(brewer.pal(9, "Blues"))(100)
+image(cor(y), col=cols)
+```
+
+Here we are using the term *structure* to refer to the deviation from what one would see if the samples were in fact independent from each other. 
+
+One simple exploratory plot we make to determine how many principal components we need to describe this *structure* is the variance-explained plot. This is what the variance explained for the PCs would look like:
+
+```{r variance explained for random data}
+y0 <- matrix( rnorm( nrow(y)*ncol(y) ), nrow(y), ncol(y) )
+d0 <- prcomp(y0)$sdev
+plot(d0^2/sum(d0^2), ylim=c(0,.25))
+```
+
+Instead we see this:
+
+```{r variance explained for GSE5859}
+plot(pc$sdev^2/sum(pc$sdev^2))
+```
+
+At least 20 or so PCs appear to be higher than what we would expect with independent data. A next step is to try to explain these PCs with measured variables. Is this driven by ethnicity? sex? date? something else?
+
+## MDS plot
+
+As we previously showed we can make MDS plots to start exploring the data to answer these questions. One way to explore the relationship
+between variables of interest and PCs we can use color to denote these variables. For example, here are the first two PCs with color representing ethnicity:
+
+
+```{r mds plot,fig.align='center'}
+cols = as.numeric(eth)
+mypar2(1,1)
+plot(pc$rotation[,1], pc$rotation[,2], col=cols, pch=16,
+     xlab="PC1", ylab="PC2")
+legend("bottomleft", levels(eth), col=seq(along=levels(eth)), pch=16)
+```
+
+There is a very clear association between the first PC and ethnicity. However, we also see that for the orange points there are sub-clusters. We know from previous analyzes that ethnicity and preprocessing date are correlated:
+
+## Confounding 
+
+```{r get year}
+year = factor(format(dates,"%y"))
+table(year,eth)
+```
+
+Here is the same plot but with color now representing year:
+
+```{r mds with year,fig.align='center'}
+cols = as.numeric(year)
+mypar2(1,1)
+plot(pc$rotation[,1],pc$rotation[,2],col=cols,pch=16,
+     xlab="PC1",ylab="PC2")
+legend("bottomleft",levels(year),col=seq(along=levels(year)),pch=16)
+```
+
+Year is also very correlated with the first PC. So which variable is driving this? Given the high level of confounding it is not easy to parse out but below and in the assessment questions we provide some further exploratory approaches.
+
+## Boxplot of PCs
+
+The structure seen in the plot of the between sample correlations shows a complex structure that seems to have more than 5 factors (one for each year). It certainly has more complexity than what would be explained by ethnicity. We can also explore the correlation with months. 
+
+```{r boxplot of PCs}
+month <- format(dates,"%y%m")
+length(unique(month))
+```
+
+Because there are so many months (21), it get's a bit  complicated to use color. Instead we can stratify by month and look at boxplots of our PCs:
+
+
+```{r PCs by month}
+variable <- as.numeric(month)
+mypar2(2,2)
+for(i in 1:4){
+  boxplot(split(pc$rotation[,i], variable), las=2, range=0)
+  stripchart(split(pc$rotation[,i], variable), add=TRUE, 
+             vertical=TRUE, pch=1, cex=.5, col=1)
+  }
+```
+
+Here we see that month has a very strong correlation with the first PC as well as some of the others. In cases such as these in which we have many samples, we can use an analysis of variance to see which PCs correlate with month:
+
+```{r correlation with month}
+corr <- sapply(1:ncol(pc$rotation), function(i){
+  fit <- lm(pc$rotation[,i] ~ as.factor(month))
+  return( summary(fit)$adj.r.squared  )
+  })
+mypar2(1,1)
+plot(corr)
+```
+
+We see a very strong correlation with the first PC. An relatively strong correlations for the first 20 or so PCs. We can also compute F-statistics to compare within month to across month variability:
+
+
+In the assessments we will see how we can use the PCs as estimates in factor analysis to improve model estimates.
+
+
+## More on confounding 
+
+
+```{r show confounding}
+tab = table(year,eth)
+print(tab)
+```
+
+By running a *t*-test and creating a volcano plot, we note that thousands of genes appear to be differentially expressed. But when we perform a similar comparison between 2002 and 2003 only on the CEU population we again obtain thousands of diferentially expressed genes:
+
+```{r}
+library(genefilter)
+
+ind <- which(eth%in%c("CEU","ASN"))
+res1 <- rowttests(exprs(e)[,ind], droplevels(eth[ind]))
+
+ind <- which(year%in%c("02","03") & eth=="CEU")
+res2 <- rowttests(exprs(e)[,ind], droplevels(year[ind]))
+
+XLIM <- max(abs(c(res1$dm,res2$dm)))*c(-1,1)
+YLIM <- range(-log10(c(res1$p,res2$p)))
+
+mypar2(1,2)
+plot(res1$dm,-log10(res1$p), xlim=XLIM, ylim=YLIM, xlab="Effect size",
+     ylab="-log10(p-value)", main="Populations")
+plot(res2$dm,-log10(res2$p), xlim=XLIM, ylim=YLIM, xlab="Effect size",
+     ylab="-log10(p-value)", main="2003 v 2002")
+```
+
+
+
+
